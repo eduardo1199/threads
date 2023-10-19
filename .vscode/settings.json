@@ -1,0 +1,13 @@
+{
+  "files.associations": {
+    "*.tsx": "typescriptreact",
+    "*.py": "python",
+    "*.idl": "c",
+    "stdlib.h": "c",
+    "initializer_list": "cpp",
+    "vector": "cpp",
+    "xstring": "cpp",
+    "xutility": "cpp",
+    "lodepng.h": "c"
+  }
+}
