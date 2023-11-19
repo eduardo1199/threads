@@ -8,6 +8,9 @@
     "vector": "cpp",
     "xstring": "cpp",
     "xutility": "cpp",
-    "lodepng.h": "c"
+    "lodepng.h": "c",
+    "pthread.h": "c",
+    "stdio.h": "c",
+    "unistd.h": "c"
   }
 }

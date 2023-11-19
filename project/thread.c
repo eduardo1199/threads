@@ -1,102 +1,84 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <pthread.h>
-#include <math.h>
-#include <stdint.h>
-#include <string.h>
-#include <assert.h>
+#include <unistd.h>
 
-#include "lodepng.h"
+struct mutex {
+    pthread_mutex_t mutex;
+};
 
-#define NUM_THREADS 2
+struct condvar {
+    pthread_cond_t condition;
+};
 
-// Imagem em nível de cinza
-uint8_t* grayscale_image = NULL;
-int width, height;
-
-// Matrizes para Gx, Gy e G
-int* Gx = NULL;
-int* Gy = NULL;
-int* G = NULL;
-
-// Função para calcular Gx
-void* calculate_Gx(void* arg) {
-    for (int y = 1; y < height - 1; y++) {
-        for (int x = 1; x < width - 1; x++) {
-            int sum = grayscale_image[(y + 1) * width + (x - 1)] +
-                      grayscale_image[(y + 1) * width + x] +
-                      grayscale_image[(y + 1) * width + (x + 1)] -
-                      (grayscale_image[(y - 1) * width + (x - 1)] +
-                       grayscale_image[(y - 1) * width + x] +
-                       grayscale_image[(y - 1) * width + (x + 1)]);
-
-            Gx[y * width + x] = fmax(0, fmin(sum, 255));
-        }
-    }
-    return NULL;
+void mutex_init(struct mutex *m) {
+    pthread_mutex_init(&m->mutex, NULL);
 }
 
-// Função para calcular Gy
-void* calculate_Gy(void* arg) {
-    for (int y = 1; y < height - 1; y++) {
-        for (int x = 1; x < width - 1; x++) {
-            int sum = grayscale_image[(y - 1) * width + (x + 1)] +
-                      grayscale_image[y * width + (x + 1)] +
-                      grayscale_image[(y + 1) * width + (x + 1)] -
-                      (grayscale_image[(y - 1) * width + (x - 1)] +
-                       grayscale_image[y * width + (x - 1)] +
-                       grayscale_image[(y + 1) * width + (x - 1)]);
+void condvar_init(struct condvar *c) { // iniciar a variavel de condição
+    pthread_cond_init(&c->condition, NULL);
+}
 
-            Gy[y * width + x] = fmax(0, fmin(sum, 255));
-        }
-    }
-    return NULL;
+void condvar_wait(struct condvar *c, struct mutex *m) { // destrava um mutex e poe a thread corrente para dormir
+    pthread_cond_wait(&c->condition, &m->mutex);
+}
+
+void condvar_signal(struct condvar *c) { // acorde ao menos um thread
+    pthread_cond_signal(&c->condition);
+}
+
+void condvar_broadcast(struct condvar *c) { // acordar todas as threads
+    pthread_cond_broadcast(&c->condition);
+}
+
+struct mutex mutex;
+struct condvar cv;
+
+void *worker_thread(void *arg) {
+    struct mutex *mutex_work = (struct mutex *)arg;
+
+    printf("Worker thread is starting\n");
+
+    mutex_init(mutex_work);
+
+    pthread_mutex_lock(&mutex_work->mutex);
+
+    printf("Worker thread is waiting\n");
+
+    // Espera pelo sinal
+    condvar_wait(&cv, mutex_work);
+
+    printf("Worker thread received signal and is continuing\n");
+    pthread_mutex_unlock(&mutex_work->mutex);
+
+    pthread_exit(NULL);
 }
 
 int main() {
-    // Carregue a imagem em nível de cinza usando a biblioteca lodepng
-    unsigned error;
-    error = lodepng_decode_file(&grayscale_image, &width, &height, "coins.png", LCT_GREY, 8);
+    pthread_t threads[3];
 
-    if (error) {
-        fprintf(stderr, "Error %u: %s\n", error, lodepng_error_text(error));
-        return 1;
+    // Inicializa a condição
+    condvar_init(&cv);
+
+    // crie 3 threads
+    for (int i = 0; i < 3; ++i) {
+        pthread_create(&threads[i], NULL, worker_thread, &mutex);
     }
 
-    // Aloque memória para Gx, Gy e G
-    Gx = (int*)malloc(width * height * sizeof(int));
-    Gy = (int*)malloc(width * height * sizeof(int));
-    G = (int*)malloc(width * height * sizeof(int));
+    // Aguarda um pouco antes de sinalizar as threads
+    sleep(2);
 
-    // Crie as threads
-    pthread_t threads[NUM_THREADS];
+    printf("Main thread is signaling unique worker thread to continue\n");
 
-    pthread_create(&threads[0], NULL, calculate_Gx, NULL);
-    pthread_create(&threads[1], NULL, calculate_Gy, NULL);
+    // Sinaliza todas as threads para continuar
+    //condvar_broadcast(&cv);
 
-    // Aguarde as threads terminarem
-    pthread_join(threads[0], NULL);
-    pthread_join(threads[1], NULL);
+    // Sinaliza para ao menos 1 thread continuar
+    condvar_signal(&cv);
 
-    // Combine Gx e Gy para obter G
-    for (int y = 1; y < height - 1; y++) {
-        for (int x = 1; x < width - 1; x++) {
-            G[y * width + x] = fmax(0, fmin(Gx[y * width + x] + Gy[y * width + x], 255));
-        }
+    // Aguarda que todas as threads terminem
+    for (int i = 0; i < 3; ++i) {
+        pthread_join(threads[i], NULL);
     }
-
-    // Salve a imagem de saída
-    unsigned char* output_image = (unsigned char*)G;
-    error = lodepng_encode_file("output_image.png", output_image, width, height, LCT_GREY, 8);
-    if (error) {
-        fprintf(stderr, "Error %u: %s\n", error, lodepng_error_text(error));
-    }
-
-    // Libere a memória alocada
-    free(grayscale_image);
-    free(Gx);
-    free(Gy);
-    free(G);
 
     return 0;
 }
