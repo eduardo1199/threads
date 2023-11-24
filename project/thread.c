@@ -6,28 +6,49 @@ struct mutex {
     pthread_mutex_t mutex;
 };
 
+int number_of_thread = 3;
 struct condvar {
-    pthread_cond_t condition;
+    struct mutex *mutex;
+    int number_cond;
 };
 
 void mutex_init(struct mutex *m) {
     pthread_mutex_init(&m->mutex, NULL);
 }
 
-void condvar_init(struct condvar *c) { // iniciar a variavel de condição
-    pthread_cond_init(&c->condition, NULL);
+void condvar_init(struct condvar *c, struct mutex *m) {
+    c->mutex = m;
+    c->number_cond = 0;
 }
 
-void condvar_wait(struct condvar *c, struct mutex *m) { // destrava um mutex e poe a thread corrente para dormir
-    pthread_cond_wait(&c->condition, &m->mutex);
+void condvar_wait(struct condvar *c) {
+    pthread_mutex_unlock(&c->mutex->mutex);
+
+    while (c->number_cond == 0) {
+        pthread_mutex_unlock(&c->mutex->mutex);
+        pthread_mutex_lock(&c->mutex->mutex);
+    }
+
+    c->number_cond--;
 }
 
-void condvar_signal(struct condvar *c) { // acorde ao menos um thread
-    pthread_cond_signal(&c->condition);
+void condvar_signal(struct condvar *c) {
+    c->number_cond = 1;
+
+    pthread_mutex_unlock(&c->mutex->mutex);  
 }
 
-void condvar_broadcast(struct condvar *c) { // acordar todas as threads
-    pthread_cond_broadcast(&c->condition);
+void condvar_broadcast(struct condvar *c) {
+    c->number_cond = number_of_thread;
+    pthread_mutex_unlock(&c->mutex->mutex);
+
+    for (int i = 0; i < c->number_cond; ++i) {
+        // Sinaliza todas as threads uma por uma
+        pthread_mutex_lock(&c->mutex->mutex);
+        pthread_mutex_unlock(&c->mutex->mutex);
+    }
+
+    //c->number_cond = 0;
 }
 
 struct mutex mutex;
@@ -45,7 +66,7 @@ void *worker_thread(void *arg) {
     printf("Worker thread is waiting\n");
 
     // Espera pelo sinal
-    condvar_wait(&cv, mutex_work);
+    condvar_wait(&cv);
 
     printf("Worker thread received signal and is continuing\n");
     pthread_mutex_unlock(&mutex_work->mutex);
@@ -57,23 +78,18 @@ int main() {
     pthread_t threads[3];
 
     // Inicializa a condição
-    condvar_init(&cv);
+    condvar_init(&cv, &mutex);
 
-    // crie 3 threads
-    for (int i = 0; i < 3; ++i) {
+    // Cria 3 threads
+    for (int i = 0; i < number_of_thread; ++i) {
         pthread_create(&threads[i], NULL, worker_thread, &mutex);
     }
 
     // Aguarda um pouco antes de sinalizar as threads
     sleep(2);
 
-    printf("Main thread is signaling unique worker thread to continue\n");
-
     // Sinaliza todas as threads para continuar
-    //condvar_broadcast(&cv);
-
-    // Sinaliza para ao menos 1 thread continuar
-    condvar_signal(&cv);
+    condvar_broadcast(&cv);
 
     // Aguarda que todas as threads terminem
     for (int i = 0; i < 3; ++i) {
